@@ -518,7 +518,10 @@ export FLUX_RPC_PASSWORD=mypassword
 flux-node-signer start <args> --rpc-user $FLUX_RPC_USERNAME --rpc-password $FLUX_RPC_PASSWORD
 ```
 
-## Transaction Format
+## Transaction Format (version 6)
+
+The version 7 start and delegate transactions, a node's link and the manager link are
+built in `flux_node_signer.identity`.
 
 ### Structure
 
@@ -591,18 +594,27 @@ uv run pyright
 ```
 flux-node-signer/
 ├── src/
-│   └── flux_delegate_starter/
+│   └── flux_node_signer/
 │       ├── __init__.py          # Package exports
-│       ├── __main__.py          # CLI interface
-│       ├── transaction.py       # Transaction building
-│       ├── crypto.py            # Cryptographic operations
-│       ├── rpc_client.py        # RPC client
+│       ├── __main__.py          # CLI: the version 6 commands and the helpers
+│       ├── manager_cli.py       # CLI: manager-link, view, bind, restart
+│       ├── signer.py            # A delegate's work: view, bind, restart, manager link
+│       ├── identity.py          # Version 7 formats: links, delegates, transactions
+│       ├── chain.py             # What is read from the chain, and sending to it
+│       ├── transaction.py       # Version 6 start transaction
+│       ├── crypto.py            # Signatures, hashes, key encoding
+│       ├── key_manager.py       # Encrypted key files
+│       ├── rpc_client.py        # fluxd JSON-RPC client
+│       ├── api_client.py        # Flux API client
 │       ├── models.py            # Pydantic models
 │       ├── config.py            # Configuration
 │       └── exceptions.py        # Custom exceptions
 ├── tests/
-│   ├── test_transaction.py     # Transaction tests
-│   ├── test_crypto.py           # Crypto tests
+│   ├── test_identity.py        # Version 7 formats against the specification's vectors
+│   ├── test_signer.py          # Bindings and restarts against a table of chain states
+│   ├── test_manager_cli.py     # The JSON commands
+│   ├── test_transaction.py     # Version 6 transaction tests
+│   ├── test_crypto.py          # Crypto tests
 │   └── test_rpc_client.py      # RPC tests
 ├── examples/
 │   ├── .env.example            # Environment config
@@ -614,11 +626,44 @@ flux-node-signer/
 
 ## Library Usage
 
-You can also use the library programmatically in your Python code:
+Binding nodes' keys as a manager:
 
 ```python
 import asyncio
-from flux_delegate_starter import (
+from pathlib import Path
+
+from flux_node_signer.chain import RpcChain
+from flux_node_signer.crypto import decode_wif
+from flux_node_signer.identity import NodeLink
+from flux_node_signer.key_manager import DelegateKeyManager
+from flux_node_signer.rpc_client import FluxRPCClient
+from flux_node_signer.signer import Collateral, bind
+
+
+async def main():
+    manager_key, _ = decode_wif(DelegateKeyManager.load_key(Path("manager.key.age")))
+    chain = RpcChain(
+        FluxRPCClient(host="127.0.0.1", port=16124, username="user", password="pass")
+    )
+    # The line fluxd gives in getfluxnodestatus as identity_link_text
+    link = NodeLink.parse("FLUXID1 <txid>:<n> <identitykey> <proof> <drawkey> <nodekey>")
+    collateral = Collateral(pubkey=bytes.fromhex("<the collateral's public key>"))
+
+    done = await bind(chain, manager_key, link, collateral, send=False)
+    print(done.json())  # outcome, basis, txid and the signed transaction
+
+
+asyncio.run(main())
+```
+
+`view`, `restart` and `manager_link` are in the same module and return the documents
+the commands print.
+
+A version 6 delegated start:
+
+```python
+import asyncio
+from flux_node_signer import (
     FluxnodeStartTransaction,
     FluxRPCClient,
     FluxAPIClient,
