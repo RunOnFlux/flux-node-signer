@@ -1,4 +1,4 @@
-"""CLI interface for flux-delegate-starter."""
+"""CLI interface for flux-node-signer."""
 
 import asyncio
 import sys
@@ -17,17 +17,19 @@ from .exceptions import (
     FluxDelegateStarterError,
 )
 from .key_manager import DelegateKeyManager, secure_zero_memory
+from .manager_cli import register as register_manager_commands
 from .models import BatchStartItem, BatchStartResult
 from .rpc_client import FluxRPCClient
 from .transaction import FluxnodeStartTransaction
 
 app = typer.Typer(
-    name="flux-delegate-starter",
-    help="Build and send raw delegated fluxnode START transactions",
+    name="flux-node-signer",
+    help="Signs for fluxnodes from a workstation: a manager key, bindings and starts",
     add_completion=False,
 )
 console = Console()
 err_console = Console(stderr=True)
+register_manager_commands(app)
 
 
 @app.command()
@@ -113,13 +115,13 @@ def start(
     OR --collateral-redeemscript (P2SH multisig, e.g. SSP `t3...`).
 
     Example (P2PKH collateral):
-        flux-delegate-starter start <txhash> \\
+        flux-node-signer start <txhash> \\
             --collateral-pubkey 02a2ba3b31f8cfa485b0c36cf7b4f311fa4a774dc0ddad2743238de3ac87745a4b \\
             --fluxnode-privkey <WIF> \\
             --delegate-key-file delegate.key.age
 
     Example (P2SH/SSP collateral):
-        flux-delegate-starter start <txhash> \\
+        flux-node-signer start <txhash> \\
             --collateral-redeemscript <redeem_script_hex> \\
             --fluxnode-privkey <WIF> \\
             --delegate-key-file delegate.key.age
@@ -471,7 +473,7 @@ def batch(
         fluxnode_pubkey: "..."
 
     Example:
-        flux-delegate-starter batch collaterals.yaml
+        flux-node-signer batch collaterals.yaml
     """
     # Validate transport
     if transport not in ("api", "rpc"):
@@ -764,7 +766,7 @@ def build(
     You must provide either --collateral-pubkey (P2PKH) OR --collateral-redeemscript (P2SH).
 
     Example:
-        flux-delegate-starter build <txhash> \\
+        flux-node-signer build <txhash> \\
             --collateral-pubkey 02a2ba3b31f8cfa485b0c36cf7b4f311fa4a774dc0ddad2743238de3ac87745a4b \\
             --fluxnode-privkey <WIF> -k delegate.key.age
     """
@@ -918,13 +920,13 @@ def derive_pubkey(
 
     Examples:
         # From WIF argument
-        flux-delegate-starter derive-pubkey KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn
+        flux-node-signer derive-pubkey KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn
 
         # From key file
-        flux-delegate-starter derive-pubkey --key-file delegate.key.age
+        flux-node-signer derive-pubkey --key-file delegate.key.age
 
         # From stdin
-        echo "password" | flux-delegate-starter derive-pubkey --key-file delegate.key.age
+        echo "password" | flux-node-signer derive-pubkey --key-file delegate.key.age
     """
     try:
         # Validate: must provide either wif_key or key_file
@@ -1005,7 +1007,7 @@ def generate_delegate_key(
     The public key will be saved unencrypted for easy sharing.
 
     Example:
-        flux-delegate-starter generate-delegate-key --name my-delegate
+        flux-node-signer generate-delegate-key --name my-delegate
     """
     try:
         console.print("[cyan]Generating delegate keypair...[/cyan]")
@@ -1068,7 +1070,7 @@ def generate_delegate_key(
 
         console.print("\n[dim]To use this key:[/dim]")
         console.print(
-            f"[dim]  flux-delegate-starter start <args> --delegate-key-file {privkey_path}[/dim]"
+            f"[dim]  flux-node-signer start <args> --delegate-key-file {privkey_path}[/dim]"
         )
 
     except Exception as e:
@@ -1107,7 +1109,7 @@ def find_start_tx(
     a fluxnode with the given collateral outpoint.
 
     Example:
-        flux-delegate-starter find-start-tx 1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d0 0
+        flux-node-signer find-start-tx 1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d0 0
     """
     # Validate transport
     if transport not in ("api", "rpc"):
@@ -1143,7 +1145,7 @@ def check_delegates(
     are authorized for the specified collateral.
 
     Example:
-        flux-delegate-starter check-delegates 1fa2f8c38b2c62792b5a6d08e13d90acc5120c52ebde2a99a490bf40436c611a
+        flux-node-signer check-delegates 1fa2f8c38b2c62792b5a6d08e13d90acc5120c52ebde2a99a490bf40436c611a
     """
     asyncio.run(_check_delegates(collateral_txhash, collateral_index))
 
