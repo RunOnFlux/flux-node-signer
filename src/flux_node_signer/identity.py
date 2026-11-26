@@ -381,7 +381,9 @@ class StartV7:
 
     For an ordinary collateral `collateral_pubkey` is the collateral's key; for a
     multisig one `redeem_script` is its script and `collateral_pubkey` is unused.
-    With `link` and a basis other than IN_FORCE the start sets the link's keys.
+    With `link` the start carries the link's keys: on a basis other than IN_FORCE it
+    sets them, and on IN_FORCE they are the outpoint's keys in force with the proof
+    on record, which starts the node again. Without `link` it carries no keys.
     `by_delegate` says a delegate of the outpoint signs in the owner's place.
     """
 
@@ -400,10 +402,8 @@ class StartV7:
             raise ValidationError(
                 "a start names the collateral's key or its redeem script, one of them"
             )
-        if (self.link is None) != (self.basis == Basis.IN_FORCE):
-            raise ValidationError(
-                "a start carries keys exactly when its basis is not the keys in force"
-            )
+        if self.link is None and self.basis != Basis.IN_FORCE:
+            raise ValidationError("a start that sets keys carries them")
         if self.link is not None:
             if (
                 self.link.outpoint != self.outpoint

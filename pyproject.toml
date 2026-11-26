@@ -32,9 +32,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/RunOnFlux/flux-delegate-starter"
-Repository = "https://github.com/RunOnFlux/flux-delegate-starter"
-Issues = "https://github.com/RunOnFlux/flux-delegate-starter/issues"
+Homepage = "https://github.com/RunOnFlux/flux-node-signer"
+Repository = "https://github.com/RunOnFlux/flux-node-signer"
+Issues = "https://github.com/RunOnFlux/flux-node-signer/issues"
 
 [project.scripts]
 flux-node-signer = "flux_node_signer.__main__:main"

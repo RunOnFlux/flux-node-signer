@@ -1,8 +1,9 @@
-"""The manager's commands: each prints one JSON document on standard output.
+"""A delegate's commands: each prints one JSON document on standard output.
 
     manager-link   the link by which a manager asks an owner to name its key
     view           where outpoints stand for a manager key, read from the chain
     bind           bind nodes' keys from their links, signed by the manager key
+    restart        start nodes that have left the list, with the keys they have
 
 The chain is a fluxd reached over JSON-RPC, set by FLUX_RPC_HOST, FLUX_RPC_PORT,
 FLUX_RPC_USERNAME and FLUX_RPC_PASSWORD or the matching options.
@@ -13,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -25,10 +27,10 @@ from .exceptions import FluxDelegateStarterError, ValidationError
 from .identity import NodeLink, Outpoint
 from .key_manager import DelegateKeyManager
 from .rpc_client import FluxRPCClient
-from .signer import Collateral, bind, manager_link, view
+from .signer import Collateral, bind, manager_link, restart, view
 
 KEY_FILE = typer.Option(
-    ..., "--key-file", "-k", help="The manager key's file (plain or age-encrypted)"
+    ..., "--key-file", "-k", help="The delegate key's file (plain or age-encrypted)"
 )
 PASSPHRASE = typer.Option(
     None, "--passphrase", "-p", help="The key file's passphrase (asked for when absent)"
@@ -82,6 +84,28 @@ def _collateral(entry: dict[str, Any]) -> Collateral:
         pubkey=bytes.fromhex(pubkey) if pubkey else None,
         redeem_script=bytes.fromhex(script) if script else None,
     )
+
+
+async def _each(
+    entries: list[Any], one: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+) -> list[dict[str, Any]]:
+    """Run `one` over the entries; one that fails is reported and the rest carry
+    on."""
+    results: list[dict[str, Any]] = []
+    for number, entry in enumerate(entries):
+        try:
+            results.append(await one(entry))
+        except (FluxDelegateStarterError, ValueError, AttributeError) as e:
+            results.append({"entry": number, "outcome": f"refused: {e}"})
+    return results
+
+
+def _report(results: list[dict[str, Any]]) -> None:
+    """Print the results; exit 2 when any entry was refused."""
+    _emit(results)
+    done = ("sent", "built", "nothing")
+    if any(not r.get("outcome", "").startswith(done) for r in results):
+        raise typer.Exit(2)
 
 
 def register(app: typer.Typer) -> None:
@@ -172,27 +196,58 @@ def register(app: typer.Typer) -> None:
         except (FluxDelegateStarterError, ValueError, OSError) as e:
             _fail(str(e))
 
-        async def run() -> list[dict[str, Any]]:
-            results: list[dict[str, Any]] = []
-            for number, entry in enumerate(entries):
-                try:
-                    done = await bind(
-                        chain,
-                        privkey,
-                        _link(entry.get("link")),
-                        _collateral(entry),
-                        send=not dry_run,
-                        allow_replace=allow_replace,
-                    )
-                    results.append(done.json())
-                except (FluxDelegateStarterError, ValueError, AttributeError) as e:
-                    results.append({"entry": number, "outcome": f"refused: {e}"})
-            return results
+        async def one(entry: dict[str, Any]) -> dict[str, Any]:
+            done = await bind(
+                chain,
+                privkey,
+                _link(entry.get("link")),
+                _collateral(entry),
+                send=not dry_run,
+                allow_replace=allow_replace,
+            )
+            return done.json()
 
-        results = asyncio.run(run())
-        _emit(results)
-        if any(
-            not r.get("outcome", "").startswith(("sent", "built", "nothing"))
-            for r in results
-        ):
-            raise typer.Exit(2)
+        _report(asyncio.run(_each(entries, one)))
+
+    @app.command("restart")
+    def restart_command(
+        input_file: Path = typer.Argument(
+            ...,
+            help=(
+                "A JSON list; each entry has 'outpoint' (txid:n), 'node_key' (hex),"
+                " and 'collateral_pubkey' or 'redeem_script'"
+            ),
+        ),
+        key_file: Path = KEY_FILE,
+        passphrase: str | None = PASSPHRASE,
+        dry_run: bool = typer.Option(
+            False, "--dry-run", help="Build and sign, send nothing"
+        ),
+        rpc_host: str | None = RPC_HOST,
+        rpc_port: int | None = RPC_PORT,
+        rpc_user: str | None = RPC_USER,
+        rpc_password: str | None = RPC_PASSWORD,
+    ) -> None:
+        """Start each node that has left the list, with the keys it has, by a start a
+        restart key or a manager key signs."""
+        try:
+            entries = json.loads(input_file.read_text())
+            if not isinstance(entries, list):
+                raise ValidationError("the input is a JSON list")
+            privkey = _manager_privkey(key_file, passphrase)
+            chain = _chain(rpc_host, rpc_port, rpc_user, rpc_password)
+        except (FluxDelegateStarterError, ValueError, OSError) as e:
+            _fail(str(e))
+
+        async def one(entry: dict[str, Any]) -> dict[str, Any]:
+            done = await restart(
+                chain,
+                privkey,
+                Outpoint.parse(entry.get("outpoint", "")),
+                bytes.fromhex(entry.get("node_key", "")),
+                _collateral(entry),
+                send=not dry_run,
+            )
+            return done.json()
+
+        _report(asyncio.run(_each(entries, one)))

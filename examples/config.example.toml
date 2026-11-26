@@ -1,4 +1,4 @@
-# Example configuration file for flux-delegate-starter
+# Example configuration file for flux-node-signer
 # This is optional - you can also use environment variables or CLI flags
 
 [rpc]

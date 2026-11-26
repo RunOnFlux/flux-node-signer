@@ -36,6 +36,8 @@ class NodeState:
     identity_key: bytes | None = None
     draw_key: bytes | None = None
     in_force_since: int = 0
+    #: The proof the keys in force were set with; a start that carries them carries it.
+    identity_proof: bytes | None = None
     #: A pair a start has set that the node's machine has not confirmed with yet.
     pending_identity_key: bytes | None = None
     pending_since: int = 0
@@ -66,6 +68,7 @@ def node_state(
         identity_key=_key(identity.get("identity_pubkey")),
         draw_key=_key(identity.get("draw_pubkey")),
         in_force_since=int(identity.get("in_force_since") or 0),
+        identity_proof=_key(identity.get("identity_proof")),
         pending_identity_key=_key(row.get("identity_pending_pubkey")),
         pending_since=int(row.get("identity_pending_since") or 0),
         delegates=[

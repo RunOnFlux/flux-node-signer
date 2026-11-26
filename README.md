@@ -1,35 +1,117 @@
-# flux-delegate-starter
+# flux-node-signer
 
-Build and send raw delegated fluxnode START transactions from scratch in Python.
+Signs for fluxnodes from a workstation. It holds a delegate key an owner has named for
+their nodes, reads the chain, and builds, signs and sends fluxnode transactions. It
+reaches no node: what it needs from a node is handed to it.
 
-## Overview
+## What it does
 
-This tool builds raw fluxnode START transactions manually, bypassing the high-level RPC commands. It provides complete control over transaction building, signing, and broadcasting.
+An owner names a key for a node (an outpoint) as a delegate, with one of two roles:
 
-**What it does:**
-- Builds raw fluxnode START transactions (version 6 with delegates)
-- Serializes all transaction fields according to fluxnode protocol
-- Signs transactions with secp256k1 delegate keys
-- Sends transactions via `sendrawtransaction` RPC
+| Role | May |
+|---|---|
+| restart key | start the node again with the keys it has |
+| manager key | that, and set the node's keys |
 
-**Why use this instead of `startfluxnodeasdelegate`?**
-- Complete control over transaction building
-- No need for wallet access
-- Can run anywhere with RPC access
-- Educational: understand transaction format
-- Batch operations with YAML files
-- Better for automation and scripting
+| Command | What it does |
+|---|---|
+| `generate-delegate-key` | makes a key and writes it encrypted (age, by passphrase) |
+| `manager-link` | makes the link a manager gives an owner, who names the key from it in their wallet |
+| `view` | reports where each outpoint stands for a manager key: not named, unbound, pending or bound |
+| `bind` | binds nodes' keys from their links, with a version 7 start the manager key signs |
+| `restart` | starts nodes that have left the list, with the keys they have (version 7) |
+| `start`, `batch`, `build` | a version 6 delegated start, one node or many |
+| `derive-pubkey`, `check-delegates`, `find-start-tx`, `test-connection` | helpers |
 
-## Features
+`manager-link`, `view`, `bind` and `restart` print one JSON document on standard output
+and their errors on standard error, so a program can call them. The same operations
+are a library: `flux_node_signer.signer` (`manager_link`, `view`, `bind`, `restart`)
+over the formats in `flux_node_signer.identity`.
 
-- ✅ Raw transaction building from scratch
-- ✅ Compact recoverable signature (secp256k1)
-- ✅ Zelcash message signing format
-- ✅ Batch mode with YAML files
-- ✅ Dry-run mode for testing
-- ✅ Transaction decoding for debugging
-- ✅ Rich CLI output with progress tracking
-- ✅ Comprehensive test suite
+## A manager's work, end to end
+
+The chain is a fluxd reached over JSON-RPC: `FLUX_RPC_HOST`, `FLUX_RPC_PORT`,
+`FLUX_RPC_USERNAME`, `FLUX_RPC_PASSWORD`, or the `--rpc-*` options.
+
+1. **Make the manager key**, once:
+
+   ```bash
+   flux-node-signer generate-delegate-key --name manager
+   ```
+
+2. **Give each owner a manager link** for their nodes. The owner's wallet reads it,
+   shows the key's fingerprint, and names the key for those outpoints. The owner
+   compares the fingerprint with the one you show them.
+
+   ```bash
+   flux-node-signer manager-link --key-file manager.key.age <txid>:<n> [<txid>:<n> ...]
+   ```
+
+   ```json
+   {
+    "line": "FLUXMGR1 <managerkey> <proof> <txid>:<n>",
+    "managerkey": "<66 hex>",
+    "fingerprint": "0a2e 0718 47fb b0e6 32c5 afa1 617f 273e",
+    "proof": "<128 hex>",
+    "outpoints": ["<txid>:<n>"]
+   }
+   ```
+
+3. **See which outpoints name the key**, and the state of each node's keys:
+
+   ```bash
+   flux-node-signer view --manager-key <66 hex> <txid>:<n> [<txid>:<n> ...]
+   ```
+
+   Each entry's `standing` is `not-named`, `unbound`, `pending` (a start has set keys
+   the node's machine has not confirmed with yet) or `bound`.
+
+4. **Bind each node's keys.** A node's link is the line fluxd gives in
+   `getfluxnodestatus` (`identity_link_text`, or by field in `identity_link`). The
+   input is a JSON list:
+
+   ```json
+   [
+    {"link": "FLUXID1 <txid>:<n> <identitykey> <proof> <drawkey> <nodekey> [<vouch>]",
+     "collateral_pubkey": "<66 hex>"},
+    {"link": {"outpoint": "<txid>:<n>", "identitykey": "...", "proof": "...",
+              "drawkey": "...", "nodekey": "..."},
+     "redeem_script": "<hex>"}
+   ]
+   ```
+
+   ```bash
+   flux-node-signer bind nodes.json --key-file manager.key.age [--dry-run]
+   ```
+
+   For each entry the tool checks the link's proof, reads the outpoint's state, and
+   states the basis the chain will hold it to: `new` (the outpoint is off the list
+   and has never had keys), `vouched` (the link is vouched by the key the chain shows
+   for the node) or `replaces` (another machine takes the node over). It signs
+   nothing for a link whose proof fails, for an outpoint the key is not a manager of,
+   or for keys the chain already has. A `replaces` binding is refused unless
+   `--allow-replace` is given. Each result carries the `outcome`, the `basis`, the
+   start's `txid` and its hex. The command exits 2 when any entry was refused.
+
+5. **Restart a node that has left the list**, by a restart key or a manager key:
+
+   ```json
+   [{"outpoint": "<txid>:<n>", "node_key": "<hex>", "collateral_pubkey": "<66 hex>"}]
+   ```
+
+   ```bash
+   flux-node-signer restart nodes.json --key-file restart.key.age [--dry-run]
+   ```
+
+   The start carries the node's keys in force and the proof they were set with;
+   `node_key` is the node key that proof covers.
+
+A multisig collateral is named by its `redeem_script` in place of `collateral_pubkey`.
+
+## Version 6 delegated starts
+
+`start`, `batch` and `build` make the version 6 start a delegate signs. The sections
+below describe them.
 
 ## Installation
 
@@ -45,19 +127,19 @@ This tool builds raw fluxnode START transactions manually, bypassing the high-le
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### Install flux-delegate-starter
+### Install flux-node-signer
 
 ```bash
 # From PyPI
-pip install flux-delegate-starter
+pip install flux-node-signer
 ```
 
 Or install from source:
 
 ```bash
 # Clone the repository
-git clone https://github.com/RunOnFlux/flux-delegate-starter.git
-cd flux-delegate-starter
+git clone https://github.com/RunOnFlux/flux-node-signer.git
+cd flux-node-signer
 
 # Install with uv
 uv sync
@@ -73,7 +155,7 @@ uv sync --dev
 source .venv/bin/activate
 
 # Test the CLI
-flux-delegate-starter --help
+flux-node-signer --help
 ```
 
 ## Quick Start
@@ -81,13 +163,13 @@ flux-delegate-starter --help
 ### 1. Test RPC Connection
 
 ```bash
-flux-delegate-starter test-connection --rpc-user <username> --rpc-password <password>
+flux-node-signer test-connection --rpc-user <username> --rpc-password <password>
 ```
 
 ### 2. Start a Single Fluxnode
 
 ```bash
-flux-delegate-starter start <collateral_txhash> \
+flux-node-signer start <collateral_txhash> \
   --fluxnode-privkey <fluxnode_wif> \
   --delegate-key <delegate_wif> \
   --rpc-user <username> \
@@ -97,7 +179,7 @@ flux-delegate-starter start <collateral_txhash> \
 **Example:**
 
 ```bash
-flux-delegate-starter start \
+flux-node-signer start \
   1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d \
   --fluxnode-privkey KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn \
   --delegate-key L3MnxQhwxBvKiJ5TKxHgCdeWPRzkYSdXqXT3qYjG8aE9XfC7vZqQ \
@@ -108,13 +190,13 @@ flux-delegate-starter start \
 ### 3. Dry Run (Build but Don't Send)
 
 ```bash
-flux-delegate-starter start <args> --dry-run
+flux-node-signer start <args> --dry-run
 ```
 
 ### 4. Decode Transaction
 
 ```bash
-flux-delegate-starter start <args> --decode --dry-run
+flux-node-signer start <args> --decode --dry-run
 ```
 
 ### 5. Batch Start Multiple Fluxnodes
@@ -148,13 +230,13 @@ Then run:
 
 ```bash
 # Using default API transport (no credentials needed)
-flux-delegate-starter batch collaterals.yaml
+flux-node-signer batch collaterals.yaml
 
 # With encrypted key files (passphrase via stdin)
-echo "mypassphrase" | flux-delegate-starter batch collaterals.yaml
+echo "mypassphrase" | flux-node-signer batch collaterals.yaml
 
 # Or provide passphrase via option
-flux-delegate-starter batch --passphrase "mypassphrase" collaterals.yaml
+flux-node-signer batch --passphrase "mypassphrase" collaterals.yaml
 ```
 
 See `examples/collaterals.example.yaml` for more detailed examples.
@@ -166,7 +248,7 @@ See `examples/collaterals.example.yaml` for more detailed examples.
 Start a single fluxnode.
 
 ```bash
-flux-delegate-starter start [OPTIONS] COLLATERAL_TXHASH
+flux-node-signer start [OPTIONS] COLLATERAL_TXHASH
 ```
 
 **Required Options (one of each):**
@@ -194,7 +276,7 @@ For a multisig collateral created through SSP (an address starting `t3...`), pas
 redeem script instead of a pubkey. SSP shows the Redeem Script in the node's details.
 
 ```bash
-flux-delegate-starter start <collateral_txhash> \
+flux-node-signer start <collateral_txhash> \
   --collateral-redeemscript <redeem_script_hex> \
   --fluxnode-privkey <fluxnode_wif> \
   --delegate-key-file delegate.key.age
@@ -207,7 +289,7 @@ flux-delegate-starter start <collateral_txhash> \
 Start multiple fluxnodes from a YAML file.
 
 ```bash
-flux-delegate-starter batch [OPTIONS] YAML_FILE
+flux-node-signer batch [OPTIONS] YAML_FILE
 ```
 
 **Options:**
@@ -226,12 +308,12 @@ If your YAML file uses encrypted delegate key files (`.key.age`), provide the pa
 
 1. Command-line option:
 ```bash
-flux-delegate-starter batch --passphrase "mypassphrase" collaterals.yaml
+flux-node-signer batch --passphrase "mypassphrase" collaterals.yaml
 ```
 
 2. Stdin (for scripting):
 ```bash
-echo "mypassphrase" | flux-delegate-starter batch collaterals.yaml
+echo "mypassphrase" | flux-node-signer batch collaterals.yaml
 ```
 
 **Note:** The same passphrase is used for ALL encrypted key files in the batch. If your files use different passphrases, run multiple batch commands.
@@ -241,7 +323,7 @@ echo "mypassphrase" | flux-delegate-starter batch collaterals.yaml
 Build transaction and output hex only (for scripting).
 
 ```bash
-flux-delegate-starter build COLLATERAL_TXHASH [OPTIONS]
+flux-node-signer build COLLATERAL_TXHASH [OPTIONS]
 ```
 
 **Required Options (one of each):**
@@ -262,7 +344,7 @@ Outputs raw hex to stdout (no formatting).
 Derive public key from a WIF private key.
 
 ```bash
-flux-delegate-starter derive-pubkey WIF_PRIVATE_KEY
+flux-node-signer derive-pubkey WIF_PRIVATE_KEY
 ```
 
 This utility helps you convert your private keys to public keys. Very useful when you have:
@@ -271,7 +353,7 @@ This utility helps you convert your private keys to public keys. Very useful whe
 
 **Example:**
 ```bash
-$ flux-delegate-starter derive-pubkey KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn
+$ flux-node-signer derive-pubkey KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn
 ✓ Derived public key:
 0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798
 ```
@@ -281,7 +363,7 @@ $ flux-delegate-starter derive-pubkey KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rF
 Test RPC connection to Flux daemon.
 
 ```bash
-flux-delegate-starter test-connection [OPTIONS]
+flux-node-signer test-connection [OPTIONS]
 ```
 
 ## Getting Your Keys
@@ -314,7 +396,7 @@ Zelcore doesn't easily show public keys, so you'll need the private key:
 1. Export the private key from Zelcore for your collateral address
 2. Use our utility:
 ```bash
-flux-delegate-starter derive-pubkey <your_collateral_private_key_WIF>
+flux-node-signer derive-pubkey <your_collateral_private_key_WIF>
 ```
 
 **Option B: From flux-cli**
@@ -327,7 +409,7 @@ flux-cli getaddressesbyaccount ""
 flux-cli dumpprivkey <your_collateral_address>
 
 # Derive public key
-flux-delegate-starter derive-pubkey <WIF_from_above>
+flux-node-signer derive-pubkey <WIF_from_above>
 ```
 
 ### 3. Delegate Private Key
@@ -368,7 +450,7 @@ flux-cli getnewaddress
 flux-cli dumpprivkey <address>
 
 # Derive the public key
-flux-delegate-starter derive-pubkey <WIF_private_key>
+flux-node-signer derive-pubkey <WIF_private_key>
 ```
 
 For multi-node benchmarks, generate one key pair per node.
@@ -390,7 +472,7 @@ delegate_key="L..."  # Export from Zelcore or flux-cli
 fluxnode_privkey="K..."  # Generate with flux-cli getnewaddress
 
 # 5. Build the transaction (pubkey will be derived automatically)
-flux-delegate-starter start \
+flux-node-signer start \
   $collateral_txhash \
   --fluxnode-privkey $fluxnode_privkey \
   --delegate-key $delegate_key \
@@ -426,14 +508,14 @@ grep rpcpassword ~/.flux/flux.conf
 
 **Pass via CLI:**
 ```bash
-flux-delegate-starter start <args> --rpc-user <user> --rpc-password <pass>
+flux-node-signer start <args> --rpc-user <user> --rpc-password <pass>
 ```
 
 **Or use environment variables:**
 ```bash
 export FLUX_RPC_USERNAME=myuser
 export FLUX_RPC_PASSWORD=mypassword
-flux-delegate-starter start <args> --rpc-user $FLUX_RPC_USERNAME --rpc-password $FLUX_RPC_PASSWORD
+flux-node-signer start <args> --rpc-user $FLUX_RPC_USERNAME --rpc-password $FLUX_RPC_PASSWORD
 ```
 
 ## Transaction Format
@@ -507,7 +589,7 @@ uv run pyright
 ### Project Structure
 
 ```
-flux-delegate-starter/
+flux-node-signer/
 ├── src/
 │   └── flux_delegate_starter/
 │       ├── __init__.py          # Package exports
@@ -589,7 +671,7 @@ grep rpcpassword ~/.flux/flux.conf
 
 Then use:
 ```bash
-flux-delegate-starter start <args> --rpc-user <user> --rpc-password <pass>
+flux-node-signer start <args> --rpc-user <user> --rpc-password <pass>
 ```
 
 ### "TX decode failed"
@@ -602,7 +684,7 @@ This usually means:
 Use `--decode --dry-run` to debug:
 
 ```bash
-flux-delegate-starter start <args> --decode --dry-run
+flux-node-signer start <args> --decode --dry-run
 ```
 
 ### "bad-txns-in-belowout"
@@ -667,8 +749,8 @@ Contributions welcome! Please:
 
 ## Support
 
-- GitHub Issues: https://github.com/RunOnFlux/flux-delegate-starter/issues
-- PyPI: https://pypi.org/project/flux-delegate-starter/
+- GitHub Issues: https://github.com/RunOnFlux/flux-node-signer/issues
+- PyPI: https://pypi.org/project/flux-node-signer/
 
 ## Acknowledgments
 

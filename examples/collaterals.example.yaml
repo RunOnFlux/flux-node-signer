@@ -19,7 +19,7 @@ fluxnodes:
 
   # Example 3: Using delegate key file (encrypted with age)
   # Note: You'll be prompted for passphrase when running batch command
-  # Or use: echo "mypassphrase" | flux-delegate-starter batch collaterals.yaml
+  # Or use: echo "mypassphrase" | flux-node-signer batch collaterals.yaml
   - label: "node-3-key-file"
     collateral_txhash: "3075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d0"
     collateral_index: 1
@@ -54,7 +54,7 @@ fluxnodes:
 #
 # Encryption Notes:
 # - If using delegate_key_file with encrypted .key.age files:
-#   1. Provide via command option: flux-delegate-starter batch --passphrase "mypass" file.yaml
-#   2. Pipe passphrase via stdin: echo "mypass" | flux-delegate-starter batch file.yaml
+#   1. Provide via command option: flux-node-signer batch --passphrase "mypass" file.yaml
+#   2. Pipe passphrase via stdin: echo "mypass" | flux-node-signer batch file.yaml
 #   3. The SAME passphrase will be used for ALL encrypted key files in the batch
 #   4. If files have different passphrases, use multiple batch commands

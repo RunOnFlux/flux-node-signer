@@ -300,8 +300,6 @@ def test_a_start_is_refused_before_it_is_built_when_it_contradicts_itself(
             **common, collateral_pubkey=public(COLLATERAL), redeem_script=REDEEM_SCRIPT
         )
     with pytest.raises(ValidationError):
-        StartV7(**common, collateral_pubkey=public(COLLATERAL), link=link)
-    with pytest.raises(ValidationError):
         StartV7(**common, collateral_pubkey=public(COLLATERAL), basis=Basis.NEW)
     unvouched = NodeLink.parse(LINK.rsplit(" ", 1)[0])
     with pytest.raises(ValidationError):
@@ -318,6 +316,26 @@ def test_a_start_is_refused_before_it_is_built_when_it_contradicts_itself(
             link=link,
             basis=Basis.NEW,
         )
+
+
+def test_a_start_with_the_keys_in_force_carries_them_on_basis_none(
+    link: NodeLink,
+) -> None:
+    common = {
+        "outpoint": OUTPOINT,
+        "node_key": public(NODE),
+        "sign_height": SIGN_HEIGHT,
+        "sig_time": SIG_TIME,
+        "collateral_pubkey": public(COLLATERAL),
+    }
+    setting = StartV7(**common, link=link, basis=Basis.NEW).unsigned()
+    carrying = StartV7(**common, link=link).unsigned()
+    # the same bytes but the basis, the last of the identity fields
+    assert carrying[:-1] == setting[:-1] and (carrying[-1], setting[-1]) == (0, 1)
+    # with no link a start has no identity bit and ends at its sigTime
+    bare = StartV7(**common).unsigned()
+    assert bare[5:9] == (0x0001).to_bytes(4, "little")
+    assert bare.endswith(SIG_TIME.to_bytes(4, "little"))
 
 
 def test_a_start_a_delegate_signs_says_so_and_differs_only_there(

@@ -1,9 +1,10 @@
-"""What a manager's tool does for the nodes it is named for.
+"""What a delegate's tool does for the nodes it is named for.
 
-A manager key is a key an owner has named for an outpoint with the manager role. This
-module makes the link by which a manager asks to be named, reports from the chain where
-each outpoint stands, and binds a node's keys from the node's link. It reaches no node:
-a link is handed to it.
+An owner names a key for an outpoint as a delegate: a manager key, which may set the
+node's keys, or a restart key, which may only start the node with the keys it has.
+This module makes the link by which a manager asks to be named, reports from the chain
+where each outpoint stands, binds a node's keys from the node's link, and starts a
+node that has left the list. It reaches no node: a link is handed to it.
 """
 
 from __future__ import annotations
@@ -13,9 +14,10 @@ from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 
 from .chain import Chain, NodeState
-from .crypto import privkey_to_pubkey
+from .crypto import privkey_to_pubkey, verify_bare
 from .exceptions import ValidationError
 from .identity import (
+    LABEL_PROOF,
     Basis,
     ManagerLink,
     NodeLink,
@@ -23,6 +25,8 @@ from .identity import (
     Role,
     StartV7,
     fingerprint,
+    identity_digest,
+    key_set_hash,
     txid,
 )
 
@@ -182,7 +186,11 @@ async def bind(
             base, outcome="refused: the manager key is not named for this outpoint"
         )
     if state.identity_key == link.identity_key:
-        return replace(base, outcome="nothing to do: these keys are in force")
+        return replace(
+            base,
+            outcome="nothing to do: these keys are in force"
+            + ("" if state.listed else "; restart starts the node with them"),
+        )
     if state.pending_identity_key == link.identity_key:
         return replace(
             base, outcome="nothing to do: these keys are pending the node's confirm"
@@ -211,6 +219,12 @@ async def bind(
         basis=basis,
         by_delegate=True,
     ).sign(manager_privkey)
+    return await _built(chain, base, sign_height, transaction, send)
+
+
+async def _built(
+    chain: Chain, base: Binding, sign_height: int, transaction: bytes, send: bool
+) -> Binding:
     built = replace(
         base,
         sign_height=sign_height,
@@ -225,3 +239,64 @@ async def bind(
             built, outcome=f"sent, but the network named it {sent_txid}", sent=True
         )
     return replace(built, outcome="sent", sent=True)
+
+
+async def restart(
+    chain: Chain,
+    delegate_privkey: bytes,
+    outpoint: Outpoint,
+    node_key: bytes,
+    collateral: Collateral,
+    *,
+    send: bool = True,
+    now: int | None = None,
+) -> Binding:
+    """Start a node that is off the list, with the keys it has, by a start a delegate
+    of the outpoint signs: a restart key or a manager key.
+
+    With an identity key in force the start carries the keys in force and the proof
+    on record, and `node_key` is the node key that proof covers. An outpoint that has
+    never had an identity key is started with `node_key` and no keys, which the chain
+    takes until it requires every start to carry them.
+    """
+    state = await chain.node_state(outpoint)
+    held = state.identity_key
+    base = Binding(
+        outpoint=str(outpoint),
+        identity_fingerprint=fingerprint(held) if held else "",
+        outcome="",
+    )
+    if state.role_of(privkey_to_pubkey(delegate_privkey, compressed=True)) is None:
+        return replace(base, outcome="refused: the key is no delegate of this outpoint")
+    if state.listed:
+        return replace(base, outcome="nothing to do: the node is on the list")
+    link = None
+    if held is not None:
+        if state.draw_key is None or state.identity_proof is None:
+            return replace(
+                base, outcome="refused: the chain gave no proof for the keys in force"
+            )
+        digest = identity_digest(
+            LABEL_PROOF, key_set_hash(outpoint, held, state.draw_key, node_key)
+        )
+        if not verify_bare(digest, state.identity_proof, held):
+            return replace(
+                base,
+                outcome="refused: that is not the node key of the node's keys in force",
+            )
+        link = NodeLink(outpoint, held, state.identity_proof, state.draw_key, node_key)
+    sign_height = await chain.height()
+    transaction = StartV7(
+        outpoint=outpoint,
+        node_key=node_key,
+        sign_height=sign_height,
+        sig_time=int(time.time()) if now is None else now,
+        collateral_pubkey=collateral.pubkey,
+        redeem_script=collateral.redeem_script,
+        link=link,
+        basis=Basis.IN_FORCE,
+        by_delegate=True,
+    ).sign(delegate_privkey)
+    return await _built(
+        chain, replace(base, basis="in-force"), sign_height, transaction, send
+    )

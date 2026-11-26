@@ -1,8 +1,8 @@
-"""Custom exceptions for flux-delegate-starter."""
+"""Custom exceptions for flux-node-signer."""
 
 
 class FluxDelegateStarterError(Exception):
-    """Base exception for all flux-delegate-starter errors."""
+    """Base exception for all flux-node-signer errors."""
 
     pass
 

@@ -1,6 +1,7 @@
 """A manager's bindings, against a chain that answers from a table."""
 
 import hashlib
+from dataclasses import replace
 
 from flux_node_signer.chain import NodeState, node_state
 from flux_node_signer.crypto import SECP256K1_ORDER, privkey_to_pubkey, sign_bare
@@ -22,6 +23,7 @@ from flux_node_signer.signer import (
     bind,
     choose_basis,
     manager_link,
+    restart,
     standing,
     view,
 )
@@ -295,3 +297,80 @@ def test_the_chains_answers_become_one_state() -> None:
 def test_the_manager_link_names_the_owners_outpoints() -> None:
     made = manager_link(MANAGER, [OUTPOINT])
     assert made.proof_verifies() and made.manager_key == public("signer manager")
+
+
+RESTART = secret("signer restart")
+RESTARTED = [Delegate(public("signer restart"), Role.RESTART)]
+
+
+def lapsed(delegates: list[Delegate]) -> NodeState:
+    """An outpoint off the list whose machine "a" has keys in force."""
+    held = link("a")
+    return NodeState(
+        OUTPOINT,
+        delegates=delegates,
+        identity_key=held.identity_key,
+        draw_key=held.draw_key,
+        identity_proof=held.proof,
+        in_force_since=431,
+    )
+
+
+async def test_a_restart_key_starts_a_lapsed_node_with_the_keys_in_force() -> None:
+    chain = TableChain(lapsed(RESTARTED))
+    done = await restart(
+        chain, RESTART, OUTPOINT, public("a node"), COLLATERAL, now=NOW
+    )
+    assert (done.outcome, done.basis, done.sent) == ("sent", "in-force", True)
+    expected = StartV7(
+        OUTPOINT,
+        public("a node"),
+        HEIGHT,
+        NOW,
+        collateral_pubkey=COLLATERAL.pubkey,
+        link=link("a"),
+        basis=Basis.IN_FORCE,
+        by_delegate=True,
+    ).sign(RESTART)
+    assert chain.sent == [expected]
+    assert done.identity_fingerprint == link("a").fingerprint()
+    # a manager key restarts as a restart key does
+    chain = TableChain(lapsed(MANAGED))
+    done = await restart(
+        chain, MANAGER, OUTPOINT, public("a node"), COLLATERAL, now=NOW
+    )
+    assert done.outcome == "sent"
+
+
+async def test_a_restart_is_refused_for_another_node_key_or_by_no_delegate() -> None:
+    chain = TableChain(lapsed(RESTARTED))
+    wrong = await restart(chain, RESTART, OUTPOINT, public("b node"), COLLATERAL)
+    assert wrong.outcome.startswith("refused: that is not the node key")
+    stranger = await restart(chain, MANAGER, OUTPOINT, public("a node"), COLLATERAL)
+    assert stranger.outcome == "refused: the key is no delegate of this outpoint"
+    assert not chain.sent
+
+
+async def test_a_listed_node_is_not_restarted() -> None:
+    state = replace(lapsed(RESTARTED), listed=True)
+    chain = TableChain(state)
+    done = await restart(chain, RESTART, OUTPOINT, public("a node"), COLLATERAL)
+    assert done.outcome == "nothing to do: the node is on the list" and not chain.sent
+
+
+async def test_an_outpoint_that_never_had_keys_is_started_without_any() -> None:
+    chain = TableChain(NodeState(OUTPOINT, delegates=RESTARTED))
+    done = await restart(
+        chain, RESTART, OUTPOINT, public("a node"), COLLATERAL, now=NOW
+    )
+    assert done.outcome == "sent" and done.identity_fingerprint == ""
+    # a delegate signs; no identity bit
+    assert chain.sent[0][5:9] == (0x0101).to_bytes(4, "little")
+
+
+async def test_bind_points_at_restart_for_keys_in_force_on_a_lapsed_node() -> None:
+    chain = TableChain(lapsed(MANAGED))
+    done = await bind(chain, MANAGER, link("a"), COLLATERAL)
+    assert done.outcome == (
+        "nothing to do: these keys are in force; restart starts the node with them"
+    )
