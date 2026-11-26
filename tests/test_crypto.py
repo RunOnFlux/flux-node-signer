@@ -2,7 +2,7 @@
 
 import pytest
 
-from flux_delegate_starter.crypto import (
+from flux_node_signer.crypto import (
     decode_wif,
     hash160,
     hash256,

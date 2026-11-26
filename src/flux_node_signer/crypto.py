@@ -60,41 +60,46 @@ def privkey_to_pubkey(privkey: bytes, compressed: bool = True) -> bytes:
     return pubkey.format(compressed=compressed)
 
 
-def sign_compact(message_hash: bytes, privkey: bytes) -> bytes:
-    """
-    Sign a message hash with Bitcoin compact recoverable signature format.
+SECP256K1_ORDER = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 
-    coincurve returns: [r (32 bytes), s (32 bytes), recovery_id (1 byte)]
-    Bitcoin compact format: [27/31 + recovery_id (1 byte), r (32 bytes), s (32 bytes)]
 
-    Args:
-        message_hash: 32-byte hash to sign (should already be hashed)
-        privkey: 32-byte private key
+def sign_compact(message_hash: bytes, privkey: bytes, compressed: bool = True) -> bytes:
+    """A 65-byte recoverable signature of a 32-byte hash: a header byte of 27 +
+    recovery id, plus 4 when the signing key's public form is compressed, then r and
+    s (32 bytes each, big-endian, s in the lower half of the curve order)."""
+    signature = PrivateKey(privkey).sign_recoverable(message_hash, hasher=None)
+    header = 27 + signature[64] + (4 if compressed else 0)
+    return bytes([header]) + signature[:64]
 
-    Returns:
-        65-byte compact signature in Bitcoin format
-    """
-    pk = PrivateKey(privkey)
 
-    # Sign with recoverable signature (hasher=None means data is already hashed)
-    sig = pk.sign_recoverable(message_hash, hasher=None)
+def sign_bare(message_hash: bytes, privkey: bytes) -> bytes:
+    """A 64-byte signature of a 32-byte hash: r then s, s in the lower half of the
+    order."""
+    return PrivateKey(privkey).sign_recoverable(message_hash, hasher=None)[:64]
 
-    # coincurve format: [r (32 bytes), s (32 bytes), recovery_id (1 byte)]
-    r = sig[0:32]
-    s = sig[32:64]
-    recovery_id = sig[64]
 
-    # Determine if the key produces compressed pubkeys
-    # For Flux delegate signing, we always use compressed pubkeys
-    pubkey = pk.public_key
-    is_compressed = len(pubkey.format(compressed=True)) == 33
+def _der_integer(value: bytes) -> bytes:
+    body = value.lstrip(b"\x00") or b"\x00"
+    if body[0] & 0x80:
+        body = b"\x00" + body
+    return b"\x02" + bytes([len(body)]) + body
 
-    # Apply Bitcoin compact format offset
-    # Compressed: 31 + recovery_id (31-34), Uncompressed: 27 + recovery_id (27-30)
-    compact_byte = (31 if is_compressed else 27) + recovery_id
 
-    # Return Bitcoin compact signature format: [compact_byte, r, s]
-    return bytes([compact_byte]) + r + s
+def verify_bare(message_hash: bytes, signature: bytes, pubkey: bytes) -> bool:
+    """Whether `signature` (64 bytes, r then s) is `pubkey`'s over the hash. A
+    signature whose s is in the upper half of the curve order is refused."""
+    if (
+        len(signature) != 64
+        or int.from_bytes(signature[32:], "big") > SECP256K1_ORDER // 2
+    ):
+        return False
+    body = _der_integer(signature[:32]) + _der_integer(signature[32:])
+    try:
+        return PublicKey(pubkey).verify(
+            b"\x30" + bytes([len(body)]) + body, message_hash, hasher=None
+        )
+    except ValueError:
+        return False
 
 
 def verify_compact_signature(

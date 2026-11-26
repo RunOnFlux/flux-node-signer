@@ -1,7 +1,7 @@
 [project]
-name = "flux-delegate-starter"
-version = "0.2.0"
-description = "Build and send raw delegated fluxnode START transactions"
+name = "flux-node-signer"
+version = "0.3.0"
+description = "Signs for fluxnodes from a workstation: a manager key, bindings, starts and restarts"
 readme = "README.md"
 requires-python = ">=3.13"
 keywords = ["flux", "fluxnode", "blockchain", "cryptocurrency", "delegates", "transaction", "secp256k1"]
@@ -37,7 +37,7 @@ Repository = "https://github.com/RunOnFlux/flux-delegate-starter"
 Issues = "https://github.com/RunOnFlux/flux-delegate-starter/issues"
 
 [project.scripts]
-flux-delegate-starter = "flux_delegate_starter.__main__:main"
+flux-node-signer = "flux_node_signer.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -72,6 +72,10 @@ select = [
     "ARG", # flake8-unused-arguments
     "SIM", # flake8-simplify
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Test vectors keep the line breaks of the specification they are copied from.
+"tests/test_identity.py" = ["E501"]
 
 [tool.ruff.lint.flake8-bugbear]
 # typer.Option(...)/typer.Argument(...) as argument defaults is the required

@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
-from flux_delegate_starter.exceptions import ConfigError, RPCError
-from flux_delegate_starter.rpc_client import FluxRPCClient
+from flux_node_signer.exceptions import ConfigError, RPCError
+from flux_node_signer.rpc_client import FluxRPCClient
 
 
 class TestFluxRPCClient:

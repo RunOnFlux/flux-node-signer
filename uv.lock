@@ -303,8 +303,8 @@ wheels = [
 ]
 
 [[package]]
-name = "flux-delegate-starter"
-version = "0.2.0"
+name = "flux-node-signer"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

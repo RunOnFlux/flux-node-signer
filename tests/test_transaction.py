@@ -4,9 +4,9 @@ import struct
 
 import pytest
 
-from flux_delegate_starter.crypto import decode_wif
-from flux_delegate_starter.exceptions import TransactionError
-from flux_delegate_starter.transaction import (
+from flux_node_signer.crypto import decode_wif
+from flux_node_signer.exceptions import TransactionError
+from flux_node_signer.transaction import (
     CFluxnodeDelegates,
     COutPoint,
     FluxnodeStartTransaction,
